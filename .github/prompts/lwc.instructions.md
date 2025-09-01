@@ -1,60 +1,107 @@
 ---
-description: "This document provides guidelines for working with Lightning Web Components (LWC) in Salesforce projects. It includes best practices, coding standards, and instructions for creating and managing LWC components."
-applyTo: '**/lwc/**'
+description: "Concise, actionable guidelines for building, reviewing, and tuning Lightning Web Components (LWC). Optimized for Copilot use during coding and PR reviews."
+applyTo: "**/lwc/**"
 ---
 
-# 📝 LWC Code Guidelines
+# 📝 LWC Code Guidelines (Compact)
 
-## 1. General
-- **Use Lightning Base Components (`lightning-*`) instead of custom HTML** to inherit SLDS styling, accessibility, and built-in optimisations. <!-- :contentReference[oaicite:0]{index=0} -->
-- Name component folders and tags in **lower-case kebab-case**; the folder name must match the `<template>` root tag. <!-- :contentReference[oaicite:1]{index=1} -->
-- Expose public properties with the `@api` decorator; keep everything else private. <!-- :contentReference[oaicite:2]{index=2} -->
-- **Write modern ES6+ JavaScript** (`const` / `let`, arrow functions, modules) to align with the LWC runtime. <!-- :contentReference[oaicite:3]{index=3} -->
-- Prefer **Lightning Data Service** or `@AuraEnabled(cacheable=true)` Apex over imperative calls to reduce round-trips and leverage caching. <!-- :contentReference[oaicite:4]{index=4} -->
-- Avoid direct DOM manipulation; express UI through template syntax and reactive getters. <!-- :contentReference[oaicite:5]{index=5} -->
+> Use this as a “while-coding” checklist. Defaults: modern JS, properties-down/events-up, LDS/UI API first, Apex cacheable, progressive disclosure.
 
-## 2. State Management
-- Model each component as a finite **state machine** so invalid states are impossible. <!-- :contentReference[oaicite:6]{index=6} -->
-- Derive secondary values with getters instead of storing duplicate tracked fields. <!-- :contentReference[oaicite:7]{index=7} -->
-- Group related state into single objects to keep updates atomic and predictable. <!-- :contentReference[oaicite:8]{index=8} -->
+## 1) Structure & Conventions
+- **Prefer Lightning Base Components** (`lightning-*`) for SLDS, a11y, and platform optimizations over hand-rolled HTML.  
+- **Folder/tag naming:** kebab-case; folder name = component tag root. Keep public API minimal; expose only with `@api`. (Properties down, events up.)  
+- **Modern JS only:** `const/let`, arrow functions, modules, Promises, classes, array/object methods.  
+- **Imports hygiene:** group/import platform features (Apex, labels, static resources, permissions) consistently; consider a `labels.js`.  
 
-## 3. Performance
-- **Lazy-load** heavy content with `if:true|false`, dynamic imports, or deferred `<lightning-tab>` panels. <!-- :contentReference[oaicite:9]{index=9} -->
-- Provide a **stable `key`** for every element rendered with `for:each` to avoid costly re-renders. <!-- :contentReference[oaicite:10]{index=10} -->
-- Batch DOM writes and memoise expensive getters to minimise layout thrashing. <!-- :contentReference[oaicite:11]{index=11} -->
-- Keep third-party libraries under **30 KB** minified and confirm Locker compatibility before use. <!-- :contentReference[oaicite:12]{index=12} -->
-- Use browser and platform caching wisely; favour LDS cache before custom stores. <!-- :contentReference[oaicite:13]{index=13} -->
+## 2) Data Access & Caching
+- **LDS/UI API before Apex.** Fetch only required fields; avoid `getRecordUi` unless metadata is truly needed (payload can be 100–1000× larger).  
+- **Cache when safe:** `@AuraEnabled(cacheable=true)` on idempotent Apex; leverage LDS client cache across components.  
+- **Minimize round-trips:** share data via service components; pass data between components rather than re-querying.  
+- **Queries:** select only used fields, set `LIMIT`, add pagination for large sets.  
 
-## 4. Security & Error Handling
-- Sanitize dynamic HTML with `lightning-formatted-rich-text` or DOMPurify before rendering. <!-- :contentReference[oaicite:14]{index=14} -->
-- Handle wire and promise rejections; wrap imperative Apex in `try / catch` and surface friendly messages with `reduceErrors`. <!-- :contentReference[oaicite:15]{index=15} -->
-- Never store secrets or credentials in component code; use Named Credentials or Protected Custom Metadata. <!-- :contentReference[oaicite:16]{index=16} -->
+## 3) Rendering & Performance
+- **Progressive disclosure:** lazy-instantiate with App Builder tabs/utility bar/actions when possible; otherwise use `if:true|false`.  
+- **Lists:** always provide a stable `key` for `for:each`/`iterator`; paginate or virtualize—no “infinite” unbounded lists.  
+- **Events:** keep handlers minimal; attach only what you need (each handler has overhead). Use `CustomEvent` for child→parent.  
+- **Base components & images:** prefer base components; optimize images and avoid oversized static assets.  
+- **Debug mode:** enable in dev to get framework warnings (slower!)—never on in production.  
 
-## 5. Code Examples
+## 4) State, Mutations & DOM
+- **Make invalid state hard to represent:** model components as small state machines; derive with getters instead of duplicating flags.  
+- **Don’t mutate read-only data** from `@api` or `@wire` (LDS returns shared, frozen objects). Instead shallow-copy via spread or `Object.assign`. Avoid `JSON.parse(JSON.stringify(...))`.  
+- **Avoid manual DOM manipulation** (use template bindings/getters).  
 
-### 5.1 Lazy-Loaded Tab
+## 5) Third-Party Libraries
+- **Challenge the need first** (modern JS may replace it). If needed, prefer **ESM** modules over UMD; otherwise load via static resource with `platformResourceLoader`.  
+- **Size guardrail:** if a lib is > ~30 KB min+gzip, think twice; check Locker compatibility (test in Locker Console).  
+
+## 6) Security & Communication
+- **Parent↔child:** parent sets child `@api` props or calls child `@api` methods; child dispatches `CustomEvent` up. Use **Lightning Message Service** for cross-DOM, not ad-hoc pub/sub.  
+- **Sanitize HTML:** render dynamic HTML with safe components (e.g., `lightning-formatted-rich-text`) or a vetted sanitizer. (Locker constraints apply.)  
+
+## 7) Testing & Review
+- **Jest black-box tests:** don’t create `@api` just for tests; test via inputs (props/events) and observable outputs (DOM).  
+- **Use a lightweight, repeatable code review checklist** (info block, security, performance, limits, migration to LWC, etc.).  
+
+---
+
+## Quick Patterns (copy-ready)
+
+**Wire LDS with minimal fields**
+```js
+import { getRecord, getFieldValue } from 'lightning/uiRecordApi';
+import NAME_FIELD from '@salesforce/schema/Account.Name';
+
+@wire(getRecord, { recordId: '$recordId', fields: [NAME_FIELD] })
+account;
+
+get name() { return getFieldValue(this.account.data, NAME_FIELD); }
+```
+
+**Cacheable Apex**
+```apex
+public with sharing class AccountCtl {
+  @AuraEnabled(cacheable=true)
+  public static List<Account> top(Int limitSize) {
+    return [SELECT Id, Name FROM Account ORDER BY Rating NULLS LAST LIMIT :Math.min(limitSize, 200)];
+  }
+}
+```
+```js
+import top from '@salesforce/apex/AccountCtl.top';
+@wire(top, { limitSize: 50 }) accounts;
+```
+
+**Lazy instantiate heavy tab**
 ```html
 <lightning-tabset>
-  <lightning-tab label="Details" value="details">
-    <!-- always loaded -->
-  </lightning-tab>
-  <lightning-tab label="Charts" value="charts" if:true={showCharts}>
-    <!-- heavy chart code loads only when needed -->
-  </lightning-tab>
+  <lightning-tab label="Details">...</lightning-tab>
+  <lightning-tab label="Charts" if:true={showCharts}>...</lightning-tab>
 </lightning-tabset>
 ```
 
-### 5.2 Stable Keyed List
+**Stable keyed list + pagination hint**
 ```html
-<template for:each={items} for:item="item">
-  <li key={item.id}>{item.label}</li>
+<template for:each={rows} for:item="r">
+  <c-row key={r.id} row={r}></c-row>
 </template>
+<!-- load-more or paginator here -->
 ```
 
-### 5.3 Cacheable Apex Wire
-```javascript
-import getTopAccounts from '@salesforce/apex/AccountController.getTopAccounts';
-@wire(getTopAccounts) topAccounts; // Apex is @AuraEnabled(cacheable=true)
+**Child → Parent event**
+```js
+// child.js
+this.dispatchEvent(new CustomEvent('select', { detail: { id } }));
+```
+```html
+<!-- parent.html -->
+<c-child onselect={handleSelect}></c-child>
 ```
 
+---
 
+## 📚 References
+- [Drive Consistency and Grow Developer Skills with a Developer Best Practices Checklist (2022)](https://developer.salesforce.com/blogs/2022/01/drive-consistency-and-grow-developer-skills-with-a-developer-best-practices-checklist)  
+- [Lightning Web Components Performance Best Practices (2020)](https://developer.salesforce.com/blogs/2020/06/lightning-web-components-performance-best-practices)  
+- [Step Up Your LWC Skills – Part 1 (2020)](https://developer.salesforce.com/blogs/2020/10/step-up-your-lwc-skills-part-1)  
+- [Step Up Your LWC Skills – Part 2 (2020)](https://developer.salesforce.com/blogs/2020/10/step-up-your-lwc-skills-part-2)  
